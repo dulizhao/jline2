@@ -58,7 +58,7 @@ public class FileHistory
 
     public void load(final InputStream input) throws IOException {
         checkNotNull(input);
-        load(new InputStreamReader(input));
+        load(new InputStreamReader(input, "UTF-8"));
     }
 
     public void load(final Reader reader) throws IOException {
@@ -84,7 +84,7 @@ public class FileHistory
             }
         }
 
-        PrintStream out = new PrintStream(new BufferedOutputStream(new FileOutputStream(file)));
+        PrintStream out = new PrintStream(new BufferedOutputStream(new FileOutputStream(file)), false, "UTF-8");
         try {
             for (Entry entry : this) {
                 out.println(entry.value());

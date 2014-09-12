@@ -155,6 +155,9 @@ public class KeyMap {
         bind( map, "\033[0C", Operation.FORWARD_CHAR );
         bind( map, "\033[0D", Operation.NEXT_HISTORY );
 
+        bind( map, "\033[5~", Operation.BEGINNING_OF_HISTORY ); //Page up
+        bind( map, "\033[6~", Operation.END_OF_HISTORY ); //Page down
+
         // Windows
         bind( map, "\340\000", Operation.KILL_WHOLE_LINE );
         bind( map, "\340\107", Operation.BEGINNING_OF_LINE );

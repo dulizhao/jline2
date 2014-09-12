@@ -472,13 +472,13 @@ public class ConsoleReader
      * @return false if we failed (e.g., the buffer was empty)
      */
     protected final boolean resetLine() throws IOException {
-        if (buf.cursor == 0) {
+    	if (buf.getCursor() == 0) {
             return false;
         }
 
         StringBuilder killed = new StringBuilder();
 
-        while (buf.cursor > 0) {
+        while (buf.getCursor() > 0) {
             char c = buf.current();
             if (c == 0) {
                 break;
@@ -496,8 +496,19 @@ public class ConsoleReader
 
     int getCursorPosition() {
         // FIXME: does not handle anything but a line with a prompt absolute position
-        return promptLen + buf.cursor;
+    	return wcswidth(stripAnsi(this.prompt)) + wcswidth(buf.upToCursor());
     }
+
+	int wcswidth(String s) {
+		return CharacterWidthUtil.wcswidth(s, CharacterWidthUtil.ISO_CONTROL_IGNORE);
+	}
+
+	/**
+	 * get cursor's position in unit of screen cells.
+	 */
+	int getCursorCol() {
+		return wcswidth(stripAnsi(this.prompt)) + wcswidth(buf.upToCursor());
+	}
 
     /**
      * Returns the text after the last '\n'.
@@ -532,11 +543,11 @@ public class ConsoleReader
      * Move the cursor position to the specified absolute index.
      */
     public final boolean setCursorPosition(final int position) throws IOException {
-        if (position == buf.cursor) {
+    	if (position == buf.getCursor()) {
             return true;
         }
 
-        return moveCursor(position - buf.cursor) != 0;
+    	return moveCursor(position - buf.getCursor()) != 0;
     }
 
     /**
@@ -547,16 +558,16 @@ public class ConsoleReader
      */
     private void setBuffer(final String buffer) throws IOException {
         // don't bother modifying it if it is unchanged
-        if (buffer.equals(buf.buffer.toString())) {
+    	if (buffer.equals(buf.toString())) {
             return;
         }
 
         // obtain the difference between the current buffer and the new one
         int sameIndex = 0;
 
-        for (int i = 0, l1 = buffer.length(), l2 = buf.buffer.length(); (i < l1)
+        for (int i = 0, l1 = buffer.length(), l2 = buf.length(); (i < l1)
             && (i < l2); i++) {
-            if (buffer.charAt(i) == buf.buffer.charAt(i)) {
+        	if (buffer.charAt(i) == buf.charAt(i)) {
                 sameIndex++;
             }
             else {
@@ -564,15 +575,15 @@ public class ConsoleReader
             }
         }
 
-        int diff = buf.cursor - sameIndex;
+        int diff = buf.getCursor() - sameIndex;
         if (diff < 0) { // we can't backspace here so try from the end of the buffer
             moveToEnd();
-            diff = buf.buffer.length() - sameIndex;
+            diff = buf.length() - sameIndex;
         }
 
         backspace(diff); // go back for the differences
         killLine(); // clear to the end of the line
-        buf.buffer.setLength(sameIndex); // the new length
+        buf.setLength(sameIndex); // the new length
         putString(buffer.substring(sameIndex)); // append the differences
     }
 
@@ -581,7 +592,7 @@ public class ConsoleReader
     }
 
     private void setBufferKeepPos(final String buffer) throws IOException {
-        int pos = buf.cursor;
+    	int pos = buf.getCursor();
         setBuffer(buffer);
         setCursorPosition(pos);
     }
@@ -599,10 +610,10 @@ public class ConsoleReader
             print(prompt);
         }
 
-        print(buf.buffer.toString());
+        print(buf.toString());
 
-        if (buf.length() != buf.cursor) { // not at end of line
-            back(buf.length() - buf.cursor - 1);
+        if (buf.length() != buf.getCursor()) { // not at end of line
+        	back(buf.length() - buf.getCursor() - 1);
         }
         // force drawBuffer to check for weird wrap (after clear screen)
         drawBuffer();
@@ -623,7 +634,7 @@ public class ConsoleReader
      * @return the former contents of the buffer.
      */
     final String finishBuffer() throws IOException { // FIXME: Package protected because used by tests
-        String str = buf.buffer.toString();
+    	String str = buf.toString();
         String historyLine = str;
 
         if (expandEvents) {
@@ -655,8 +666,7 @@ public class ConsoleReader
 
         history.moveToEnd();
 
-        buf.buffer.setLength(0);
-        buf.cursor = 0;
+        buf.clear();
 
         return str;
     }
@@ -846,16 +856,16 @@ public class ConsoleReader
      */
     private void drawBuffer(final int clear) throws IOException {
         // debug ("drawBuffer: " + clear);
-        if (buf.cursor == buf.length() && clear == 0) {
+    	if (buf.getCursor() == buf.length() && clear == 0) {
         } else {
-            char[] chars = buf.buffer.substring(buf.cursor).toCharArray();
+        	char[] chars = buf.substring(buf.getCursor()).toCharArray();
             if (mask != null) {
                 Arrays.fill(chars, mask);
             }
             if (terminal.hasWeirdWrap()) {
                 // need to determine if wrapping will occur:
                 int width = terminal.getWidth();
-                int pos = getCursorPosition();
+                int pos = getCursorCol();
                 for (int i = 0; i < chars.length; i++) {
                     print(chars[i]);
                     if ((pos + i + 1) % width == 0) {
@@ -880,8 +890,8 @@ public class ConsoleReader
             // best guess on whether the cursor is in that weird location...
             // Need to do this without calling ansi cursor location methods
             // otherwise it breaks paste of wrapped lines in xterm.
-            if (getCursorPosition() > 0 && (getCursorPosition() % width == 0)
-                    && buf.cursor == buf.length() && clear == 0) {
+            if (getCursorCol() > 0 && (getCursorCol() % width == 0)
+            		&& buf.getCursor() == buf.length() && clear == 0) {
                 // the following workaround is reverse-engineered from looking
                 // at what bash sent to the terminal in the same situation
                 print(32); // move cursor to next line by printing dummy space
@@ -913,7 +923,8 @@ public class ConsoleReader
 
         if (terminal.isAnsiSupported()) {
             int width = terminal.getWidth();
-            int screenCursorCol = getCursorPosition() + delta;
+            int screenCursorCol =
+            	getCursorCol() + wcswidth(buf.substring(buf.getCursor(), buf.getCursor() + delta));
             // clear current line
             printAnsiSequence("K");
             // if cursor+num wraps, then we need to clear the line(s) below too
@@ -951,11 +962,13 @@ public class ConsoleReader
         if (num == 0) return;
         if (terminal.isAnsiSupported()) {
             int width = getTerminal().getWidth();
-            int cursor = getCursorPosition();
-            int realCursor = cursor + num;
+            int cursor = getCursorCol();
+            // characters to cells
+            int cells = wcswidth(buf.substring(buf.getCursor(), buf.getCursor() + num));
+            int realCursor = cursor + cells;
             int realCol  = realCursor % width;
             int newCol = cursor % width;
-            int moveup = num / width;
+            int moveup = cells / width;
             int delta = realCol - newCol;
             if (delta < 0) moveup++;
             if (moveup > 0) {
@@ -986,17 +999,17 @@ public class ConsoleReader
      * @return the number of characters backed up
      */
     private int backspace(final int num) throws IOException {
-        if (buf.cursor == 0) {
+    	if (buf.getCursor() == 0) {
             return 0;
         }
 
         int count = 0;
 
         int termwidth = getTerminal().getWidth();
-        int lines = getCursorPosition() / termwidth;
+        int lines = getCursorCol() / termwidth;
         count = moveCursor(-1 * num) * -1;
-        buf.buffer.delete(buf.cursor, buf.cursor + count);
-        if (getCursorPosition() / termwidth != lines) {
+        buf.delete(buf.getCursor(), buf.getCursor() + count);
+        if (getCursorCol() / termwidth != lines) {
             if (terminal.isAnsiSupported()) {
                 // debug("doing backspace redraw: " + getCursorPosition() + " on " + termwidth + ": " + lines);
                 printAnsiSequence("K");
@@ -1034,21 +1047,21 @@ public class ConsoleReader
     }
 
     protected boolean moveToEnd() throws IOException {
-        if (buf.cursor == buf.length()) {
+    	if (buf.getCursor() == buf.length()) {
             return true;
         }
-        return moveCursor(buf.length() - buf.cursor) > 0;
+    	return moveCursor(buf.length() - buf.getCursor()) > 0;
     }
 
     /**
      * Delete the character at the current position and redraw the remainder of the buffer.
      */
     private boolean deleteCurrentCharacter() throws IOException {
-        if (buf.length() == 0 || buf.cursor == buf.length()) {
+    	if (buf.length() == 0 || buf.getCursor() == buf.length()) {
             return false;
         }
 
-        buf.buffer.deleteCharAt(buf.cursor);
+    	buf.deleteCharAt(buf.getCursor());
         drawBuffer(1);
         return true;
     }
@@ -1131,16 +1144,16 @@ public class ConsoleReader
         boolean ok = true;
         for (int i = 0; ok && i < count; i++) {
 
-            ok = buf.cursor < buf.buffer.length ();
+        	ok = buf.getCursor() < buf.length ();
             if (ok) {
-                char ch = buf.buffer.charAt(buf.cursor);
+            	char ch = buf.charAt(buf.getCursor());
                 if (Character.isUpperCase(ch)) {
                     ch = Character.toLowerCase(ch);
                 }
                 else if (Character.isLowerCase(ch)) {
                     ch = Character.toUpperCase(ch);
                 }
-                buf.buffer.setCharAt(buf.cursor, ch);
+                buf.setCharAt(buf.getCursor(), ch);
                 drawBuffer(1);
                 moveCursor(1);
             }
@@ -1164,9 +1177,9 @@ public class ConsoleReader
 
         boolean ok = true;
         for (int i = 0; ok && i < count; i++) {
-            ok = buf.cursor < buf.buffer.length ();
+        	ok = buf.getCursor() < buf.length ();
             if (ok) {
-                buf.buffer.setCharAt(buf.cursor, (char) c);
+            	buf.setCharAt(buf.getCursor(), (char) c);
                 drawBuffer(1);
                 if (i < (count-1)) {
                     moveCursor(1);
@@ -1188,18 +1201,18 @@ public class ConsoleReader
      */
     private boolean viPreviousWord(int count) throws IOException {
         boolean ok = true;
-        if (buf.cursor == 0) {
+        if (buf.getCursor() == 0) {
             return false;
         }
 
-        int pos = buf.cursor - 1;
+        int pos = buf.getCursor() - 1;
         for (int i = 0; pos > 0 && i < count; i++) {
             // If we are on white space, then move back.
-            while (pos > 0 && isWhitespace(buf.buffer.charAt(pos))) {
+        	while (pos > 0 && isWhitespace(buf.charAt(pos))) {
                 --pos;
             }
 
-            while (pos > 0 && !isDelimiter(buf.buffer.charAt(pos-1))) {
+        	while (pos > 0 && !isDelimiter(buf.charAt(pos-1))) {
                 --pos;
             }
 
@@ -1234,8 +1247,8 @@ public class ConsoleReader
         }
 
         setCursorPosition(startPos);
-        buf.cursor = startPos;
-        buf.buffer.delete(startPos, endPos);
+        buf.setCursor(startPos);
+        buf.delete(startPos, endPos);
         drawBuffer(endPos - startPos);
         
         // If we are doing a delete operation (e.g. "d$") then don't leave the
@@ -1273,7 +1286,7 @@ public class ConsoleReader
             return true;
         }
 
-        yankBuffer = buf.buffer.substring(startPos, endPos);
+        yankBuffer = buf.substring(startPos, endPos);
 
         /*
          * It was a movement command that moved the cursor to find the
@@ -1295,7 +1308,7 @@ public class ConsoleReader
         if (yankBuffer.length () == 0) {
             return true;
         }
-        if (buf.cursor < buf.buffer.length ()) {
+        if (buf.getCursor() < buf.length ()) {
             moveCursor(1);
         }
         for (int i = 0; i < count; i++) {
@@ -1365,9 +1378,9 @@ public class ConsoleReader
 
         if (isForward) {
             while (count-- > 0) {
-                int pos = buf.cursor + 1;
-                while (pos < buf.buffer.length()) {
-                    if (buf.buffer.charAt(pos) == (char) searchChar) {
+            	int pos = buf.getCursor() + 1;
+            	while (pos < buf.length()) {
+            		if (buf.charAt(pos) == (char) searchChar) {
                         setCursorPosition(pos);
                         ok = true;
                         break;
@@ -1393,9 +1406,9 @@ public class ConsoleReader
         }
         else {
             while (count-- > 0) {
-                int pos = buf.cursor - 1;
+            	int pos = buf.getCursor() - 1;
                 while (pos >= 0) {
-                    if (buf.buffer.charAt(pos) == (char) searchChar) {
+                	if (buf.charAt(pos) == (char) searchChar) {
                         setCursorPosition(pos);
                         ok = true;
                         break;
@@ -1438,12 +1451,12 @@ public class ConsoleReader
      * @throws IOException
      */
     private boolean viNextWord(int count) throws IOException {
-        int pos = buf.cursor;
-        int end = buf.buffer.length();
+    	int pos = buf.getCursor();
+    	int end = buf.length();
 
         for (int i = 0; pos < end && i < count; i++) {
             // Skip over letter/digits
-            while (pos < end && !isDelimiter(buf.buffer.charAt(pos))) {
+        	while (pos < end && !isDelimiter(buf.charAt(pos))) {
                 ++pos;
             }
 
@@ -1454,7 +1467,7 @@ public class ConsoleReader
              * left in tact.
              */
             if (i < (count-1) || !(state == State.VI_CHANGE_TO)) {
-                while (pos < end && isDelimiter(buf.buffer.charAt(pos))) {
+            	while (pos < end && isDelimiter(buf.charAt(pos))) {
                     ++pos;
                 }
             }
@@ -1476,22 +1489,22 @@ public class ConsoleReader
      * @throws IOException
      */
     private boolean viEndWord(int count) throws IOException {
-        int pos = buf.cursor;
-        int end = buf.buffer.length();
+    	int pos = buf.getCursor();
+    	int end = buf.length();
 
         for (int i = 0; pos < end && i < count; i++) {
             if (pos < (end-1)
-                    && !isDelimiter(buf.buffer.charAt(pos))
-                    && isDelimiter(buf.buffer.charAt (pos+1))) {
+            		&& !isDelimiter(buf.charAt(pos))
+            		&& isDelimiter(buf.charAt (pos+1))) {
                 ++pos;
             }
 
             // If we are on white space, then move back.
-            while (pos < end && isDelimiter(buf.buffer.charAt(pos))) {
+            while (pos < end && isDelimiter(buf.charAt(pos))) {
                 ++pos;
             }
 
-            while (pos < (end-1) && !isDelimiter(buf.buffer.charAt(pos+1))) {
+            while (pos < (end-1) && !isDelimiter(buf.charAt(pos+1))) {
                 ++pos;
             }
         }
@@ -1538,7 +1551,7 @@ public class ConsoleReader
         StringBuilder killed = new StringBuilder();
 
         for (; count > 0; --count) {
-            if (buf.cursor == 0) {
+        	if (buf.getCursor() == 0) {
                 success = false;
                 break;
             }
@@ -1650,7 +1663,7 @@ public class ConsoleReader
                     /*
                      * Backspacing through the "prompt" aborts the search.
                      */
-                    if (buf.cursor == 0) {
+                    if (buf.getCursor() == 0) {
                         isAborted = true;
                     }
                     break;
@@ -1669,8 +1682,8 @@ public class ConsoleReader
         if (ch == -1 || isAborted) {
             setCursorPosition(0);
             killLine();
-            putString(origBuffer.buffer);
-            setCursorPosition(origBuffer.cursor);
+            putString(origBuffer.toString());
+            setCursorPosition(origBuffer.getCursor());
             return -1;
         }
 
@@ -1678,7 +1691,7 @@ public class ConsoleReader
          * The first character of the buffer was the search character itself
          * so we discard it.
          */
-        String searchTerm = buf.buffer.substring(1);
+        String searchTerm = buf.substring(1);
         int idx = -1;
 
         /*
@@ -1714,7 +1727,7 @@ public class ConsoleReader
         if (idx == -1) {
             setCursorPosition(0);
             killLine();
-            putString(origBuffer.buffer);
+            putString(origBuffer.toString());
             setCursorPosition(0);
             return -1;
         }
@@ -1783,7 +1796,7 @@ public class ConsoleReader
 
     private void insertClose(String s) throws IOException {
          putString(s);
-         int closePosition = buf.cursor;
+         int closePosition = buf.getCursor();
 
          moveCursor(-1);
          viMatch();
@@ -1805,13 +1818,13 @@ public class ConsoleReader
      * @throws IOException
      */
     private boolean viMatch() throws IOException {
-        int pos        = buf.cursor;
+    	int pos        = buf.getCursor();
 
         if (pos == buf.length()) {
             return false;
         }
 
-        int type       = getBracketType(buf.buffer.charAt (pos));
+        int type       = getBracketType(buf.charAt (pos));
         int move       = (type < 0) ? -1 : 1;
         int count      = 1;
 
@@ -1822,11 +1835,11 @@ public class ConsoleReader
             pos += move;
 
             // Fell off the start or end.
-            if (pos < 0 || pos >= buf.buffer.length ()) {
+            if (pos < 0 || pos >= buf.length ()) {
                 return false;
             }
 
-            int curType = getBracketType(buf.buffer.charAt (pos));
+            int curType = getBracketType(buf.charAt (pos));
             if (curType == type) {
                 ++count;
             }
@@ -1923,8 +1936,8 @@ public class ConsoleReader
         boolean first = true;
         int i = 1;
         char c;
-        while (buf.cursor + i  - 1< buf.length() && !isDelimiter((c = buf.buffer.charAt(buf.cursor + i - 1)))) {
-            buf.buffer.setCharAt(buf.cursor + i - 1, first ? Character.toUpperCase(c) : Character.toLowerCase(c));
+        while (buf.getCursor() + i  - 1< buf.length() && !isDelimiter((c = buf.charAt(buf.getCursor() + i - 1)))) {
+        	buf.setCharAt(buf.getCursor() + i - 1, first ? Character.toUpperCase(c) : Character.toLowerCase(c));
             first = false;
             i++;
         }
@@ -1936,8 +1949,8 @@ public class ConsoleReader
     private boolean upCaseWord() throws IOException {
         int i = 1;
         char c;
-        while (buf.cursor + i - 1 < buf.length() && !isDelimiter((c = buf.buffer.charAt(buf.cursor + i - 1)))) {
-            buf.buffer.setCharAt(buf.cursor + i - 1, Character.toUpperCase(c));
+        while (buf.getCursor() + i - 1 < buf.length() && !isDelimiter((c = buf.charAt(buf.getCursor() + i - 1)))) {
+        	buf.setCharAt(buf.getCursor() + i - 1, Character.toUpperCase(c));
             i++;
         }
         drawBuffer();
@@ -1948,8 +1961,8 @@ public class ConsoleReader
     private boolean downCaseWord() throws IOException {
         int i = 1;
         char c;
-        while (buf.cursor + i - 1 < buf.length() && !isDelimiter((c = buf.buffer.charAt(buf.cursor + i - 1)))) {
-            buf.buffer.setCharAt(buf.cursor + i - 1, Character.toLowerCase(c));
+        while (buf.getCursor() + i - 1 < buf.length() && !isDelimiter((c = buf.charAt(buf.getCursor() + i - 1)))) {
+        	buf.setCharAt(buf.getCursor() + i - 1, Character.toLowerCase(c));
             i++;
         }
         drawBuffer();
@@ -1969,16 +1982,16 @@ public class ConsoleReader
      */
     private boolean transposeChars(int count) throws IOException {
         for (; count > 0; --count) {
-            if (buf.cursor == 0 || buf.cursor == buf.buffer.length()) {
+        	if (buf.getCursor() == 0 || buf.getCursor() == buf.length()) {
                 return false;
             }
 
-            int first  = buf.cursor-1;
-            int second = buf.cursor;
+        	int first  = buf.getCursor()-1;
+        	int second = buf.getCursor();
 
-            char tmp = buf.buffer.charAt (first);
-            buf.buffer.setCharAt(first, buf.buffer.charAt(second));
-            buf.buffer.setCharAt(second, tmp);
+        	char tmp = buf.charAt (first);
+        	buf.setCharAt(first, buf.charAt(second));
+        	buf.setCharAt(second, tmp);
 
             // This could be done more efficiently by only re-drawing at the end.
             moveInternal(-1);
@@ -2035,19 +2048,19 @@ public class ConsoleReader
     public int moveCursor(final int num) throws IOException {
         int where = num;
 
-        if ((buf.cursor == 0) && (where <= 0)) {
+        if ((buf.getCursor() == 0) && (where <= 0)) {
             return 0;
         }
 
-        if ((buf.cursor == buf.buffer.length()) && (where >= 0)) {
+        if ((buf.getCursor() == buf.length()) && (where >= 0)) {
             return 0;
         }
 
-        if ((buf.cursor + where) < 0) {
-            where = -buf.cursor;
+        if ((buf.getCursor() + where) < 0) {
+        	where = -buf.getCursor();
         }
-        else if ((buf.cursor + where) > buf.buffer.length()) {
-            where = buf.buffer.length() - buf.cursor;
+        else if ((buf.getCursor() + where) > buf.length()) {
+        	where = buf.length() - buf.getCursor();
         }
 
         moveInternal(where);
@@ -2062,16 +2075,18 @@ public class ConsoleReader
      */
     private void moveInternal(final int where) throws IOException {
         // debug ("move cursor " + where + " ("
-        // + buf.cursor + " => " + (buf.cursor + where) + ")");
-        buf.cursor += where;
+        // + buf.getCursor() + " => " + (buf.getCursor() + where) + ")");
+        buf.advanceCursor(where);
 
         if (terminal.isAnsiSupported()) {
             if (where < 0) {
                 back(Math.abs(where));
             } else {
                 int width = getTerminal().getWidth();
-                int cursor = getCursorPosition();
-                int oldLine = (cursor - where) / width;
+                int cursor = getCursorCol();
+                // characters to cells
+                int cells = wcswidth(buf.substring(buf.getCursor() - where, buf.getCursor()));
+                int oldLine = (cursor - cells) / width;
                 int newLine = cursor / width;
                 if (newLine > oldLine) {
                     printAnsiSequence((newLine - oldLine) + "B");
@@ -2086,8 +2101,8 @@ public class ConsoleReader
 
         if (where < 0) {
             int len = 0;
-            for (int i = buf.cursor; i < buf.cursor - where; i++) {
-                if (buf.buffer.charAt(i) == '\t') {
+            for (int i = buf.getCursor(); i < buf.getCursor() - where; i++) {
+            	if (buf.charAt(i) == '\t') {
                     len += TAB_WIDTH;
                 }
                 else {
@@ -2101,14 +2116,14 @@ public class ConsoleReader
 
             return;
         }
-        else if (buf.cursor == 0) {
+        else if (buf.getCursor() == 0) {
             return;
         }
         else if (mask != null) {
             c = mask;
         }
         else {
-            print(buf.buffer.substring(buf.cursor - where, buf.cursor).toCharArray());
+        	print(buf.substring(buf.getCursor() - where, buf.getCursor()).toCharArray());
             return;
         }
 
@@ -2123,7 +2138,7 @@ public class ConsoleReader
     // FIXME: replace() is not used
 
     public final boolean replace(final int num, final String replacement) {
-        buf.buffer.replace(buf.cursor - num, buf.cursor, replacement);
+    	buf.replace(buf.getCursor() - num, buf.getCursor(), replacement);
         try {
             moveCursor(-num);
             drawBuffer(Math.max(0, num - replacement.length()));
@@ -2175,7 +2190,7 @@ public class ConsoleReader
         // to cancel based on what out current cursor position is
         if (c == 9) {
             int tabStop = 8; // will this ever be different?
-            int position = getCursorPosition();
+            int position = getCursorCol();
 
             return tabStop - (position % tabStop);
         }
@@ -2480,7 +2495,7 @@ public class ConsoleReader
                         case ABORT:
                             state = State.NORMAL;
                             buf.clear();
-                            buf.buffer.append(searchTerm);
+                            buf.append(searchTerm);
                             break;
 
                         case REVERSE_SEARCH_HISTORY:
@@ -2588,7 +2603,7 @@ public class ConsoleReader
                          * These are used by vi *-to operation (e.g. delete-to)
                          * so we know where we came from.
                          */
-                        int     cursorStart = buf.cursor;
+                        int     cursorStart = buf.getCursor();
                         State   origState   = state;
 
                         /*
@@ -2675,7 +2690,7 @@ public class ConsoleReader
                                 if (handleUserInterrupt) {
                                     println();
                                     flush();
-                                    String partialLine = buf.buffer.toString();
+                                    String partialLine = buf.toString();
                                     buf.clear();
                                     history.moveToEnd();
                                     throw new UserInterruptException(partialLine);
@@ -2735,7 +2750,7 @@ public class ConsoleReader
                                 break;
 
                             case EXIT_OR_DELETE_CHAR:
-                                if (buf.buffer.length() == 0) {
+                            	if (buf.length() == 0) {
                                     return null;
                                 }
                                 success = deleteCurrentCharacter();
@@ -2823,7 +2838,7 @@ public class ConsoleReader
                                 if (searchTerm != null) {
                                     previousSearchTerm = searchTerm.toString();
                                 }
-                                searchTerm = new StringBuffer(buf.buffer);
+                                searchTerm = new StringBuffer(buf.toString());
                                 state = State.SEARCH;
                                 if (searchTerm.length() > 0) {
                                     searchIndex = searchBackwards(searchTerm.toString());
@@ -2842,7 +2857,7 @@ public class ConsoleReader
                                 if (searchTerm != null) {
                                     previousSearchTerm = searchTerm.toString();
                                 }
-                                searchTerm = new StringBuffer(buf.buffer);
+                                searchTerm = new StringBuffer(buf.toString());
                                 state = State.FORWARD_SEARCH;
                                 if (searchTerm.length() > 0) {
                                     searchIndex = searchForwards(searchTerm.toString());
@@ -2935,7 +2950,7 @@ public class ConsoleReader
                              * otherwise it is as if the user hit enter.
                              */
                             case VI_EOF_MAYBE:
-                                if (buf.buffer.length() == 0) {
+                            	if (buf.length() == 0) {
                                     return null;
                                 }
                                 return accept();
@@ -3036,7 +3051,7 @@ public class ConsoleReader
                             case VI_YANK_TO:
                                 // Similar to delete-to, a "yy" yanks the whole line.
                                 if (state == State.VI_YANK_TO) {
-                                    yankBuffer = buf.buffer.toString();
+                                	yankBuffer = buf.toString();
                                     state = origState = State.NORMAL;
                                 }
                                 else {
@@ -3088,11 +3103,11 @@ public class ConsoleReader
                                 break;
                             
                             case VI_DELETE_TO_EOL:
-                                success = viDeleteTo(buf.cursor, buf.buffer.length(), false);
+                            	success = viDeleteTo(buf.getCursor(), buf.length(), false);
                                 break;
                                 
                             case VI_CHANGE_TO_EOL:
-                                success = viDeleteTo(buf.cursor, buf.buffer.length(), true);
+                            	success = viDeleteTo(buf.getCursor(), buf.length(), true);
                                 consoleKeys.setKeyMap(KeyMap.VI_INSERT);
                                 break;
 
@@ -3110,14 +3125,14 @@ public class ConsoleReader
                          */
                         if (origState != State.NORMAL) {
                             if (origState == State.VI_DELETE_TO) {
-                                success = viDeleteTo(cursorStart, buf.cursor, false);
+                            	success = viDeleteTo(cursorStart, buf.getCursor(), false);
                             }
                             else if (origState == State.VI_CHANGE_TO) {
-                                success = viDeleteTo(cursorStart, buf.cursor, true);
+                            	success = viDeleteTo(cursorStart, buf.getCursor(), true);
                                 consoleKeys.setKeyMap(KeyMap.VI_INSERT);
                             }
                             else if (origState == State.VI_YANK_TO) {
-                                success = viYankTo(cursorStart, buf.cursor);
+                            	success = viYankTo(cursorStart, buf.getCursor());
                             }
                             state = State.NORMAL;
                         }
@@ -3252,8 +3267,8 @@ public class ConsoleReader
         }
 
         List<CharSequence> candidates = new LinkedList<CharSequence>();
-        String bufstr = buf.buffer.toString();
-        int cursor = buf.cursor;
+        String bufstr = buf.toString();
+        int cursor = buf.getCursor();
 
         int position = -1;
 
@@ -3273,8 +3288,8 @@ public class ConsoleReader
         }
 
         List<CharSequence> candidates = new LinkedList<CharSequence>();
-        String bufstr = buf.buffer.toString();
-        int cursor = buf.cursor;
+        String bufstr = buf.toString();
+        int cursor = buf.getCursor();
 
         for (Completer comp : completers) {
             if (comp.complete(bufstr, cursor, candidates) != -1) {
@@ -3481,11 +3496,11 @@ public class ConsoleReader
      * @return true if successful
      */
     public final boolean delete() throws IOException {
-        if (buf.cursor == buf.buffer.length()) {
+        if (buf.getCursor() == buf.length()) {
           return false;
         }
 
-        buf.buffer.delete(buf.cursor, buf.cursor + 1);
+        buf.delete(buf.getCursor(), buf.getCursor() + 1);
         drawBuffer(1);
 
         return true;
@@ -3497,8 +3512,8 @@ public class ConsoleReader
      * @return true if successful
      */
     public boolean killLine() throws IOException {
-        int cp = buf.cursor;
-        int len = buf.buffer.length();
+    	int cp = buf.getCursor();
+        int len = buf.length();
 
         if (cp >= len) {
             return false;
@@ -3508,8 +3523,8 @@ public class ConsoleReader
         clearAhead(num, 0);
 
         char[] killed = new char[num];
-        buf.buffer.getChars(cp, (cp + num), killed, 0);
-        buf.buffer.delete(cp, (cp + num));
+        buf.getChars(cp, (cp + num), killed, 0);
+        buf.delete(cp, (cp + num));
 
         String copy = new String(killed);
         killRing.add(copy);
@@ -3806,13 +3821,13 @@ public class ConsoleReader
         moveToEnd();
 
         // backspace all text, including prompt
-        buf.buffer.append(this.prompt);
+        buf.append(this.prompt);
         int promptLength = 0;
         if (this.prompt != null) {
             promptLength = this.prompt.length();
         }
 
-        buf.cursor += promptLength;
+        buf.advanceCursor(promptLength);
         setPrompt("");
         backspaceAll();
 
@@ -3844,7 +3859,7 @@ public class ConsoleReader
     public void restoreLine(String originalPrompt, int cursorDest) throws IOException {
         // TODO move cursor to matched string
         String prompt = lastLine(originalPrompt);
-        String buffer = buf.buffer.toString();
+        String buffer = buf.toString();
         resetPromptLine(prompt, buffer, cursorDest);
     }
 

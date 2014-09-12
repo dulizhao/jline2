@@ -228,7 +228,7 @@ public class WindowsTerminal
                     // support some C1 control sequences: ALT + [@-_] (and [a-z]?) => ESC <ascii>
                     // http://en.wikipedia.org/wiki/C0_and_C1_control_codes#C1_set
                     int altState = KEY_EVENT_RECORD.LEFT_ALT_PRESSED | KEY_EVENT_RECORD.RIGHT_ALT_PRESSED;
-                    if (((keyEvent.uchar >= '@' && keyEvent.uchar <= '_') || (keyEvent.uchar >= 'a' && keyEvent.uchar <= 'z'))
+                    if (((keyEvent.uchar >= 'A' && keyEvent.uchar <= 'Z') || (keyEvent.uchar >= 'a' && keyEvent.uchar <= 'z'))
                         && (keyEvent.controlKeyState & altState) != 0) {
                         sb.append('\u001B'); // ESC
                     }
